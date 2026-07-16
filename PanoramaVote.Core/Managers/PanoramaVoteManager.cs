@@ -57,6 +57,11 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
     private YesNoVoteResult?   _voteResult;
     private int                _voterCount;
     private readonly int[]     _voters = new int[IPanoramaVoteService.MAXPLAYERS];
+    // Self-tracked tally (slot -> CastVote option), not read from engine netvars: the engine does
+    // not reliably write m_nVoteOptionCount for a hijacked (non-native-issue) vote, so we count
+    // casts ourselves off the vote_cast event and push them to the panel via vote_changed. Same
+    // robustness approach as Kandru/cs2-panorama-vote-manager.
+    private readonly int[]     _slotVote = new int[IPanoramaVoteService.MAXPLAYERS];
     private int                _currentCaller;
     private string             _currentTitle  = string.Empty;
     private string             _currentDetail = string.Empty;
@@ -307,26 +312,65 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
             return;
         }
 
-        if (GetController() is not { } controller)
+        if (@event.GetPlayerController("userid") is not { } voter)
         {
             return;
         }
 
-        if (_voteHandler is { } handler && @event.GetPlayerController("userid") is { } voter)
+        var slot   = voter.PlayerSlot.AsPrimitive();
+        var option = @event.GetInt("vote_option");
+
+        // Only tally players who are actually in this vote's pool.
+        if (slot >= IPanoramaVoteService.MAXPLAYERS || Array.IndexOf(_voters, slot, 0, _voterCount) < 0)
         {
-            handler(YesNoVoteAction.VoteAction_Vote, voter.PlayerSlot.AsPrimitive(), @event.GetInt("vote_option"));
+            return;
         }
 
-        UpdateVoteCounts(controller);
-        CheckForEarlyVoteClose(controller);
+        // Record this slot's choice ourselves (last cast wins — handles re-votes).
+        _slotVote[slot] = option;
+
+        _voteHandler?.Invoke(YesNoVoteAction.VoteAction_Vote, slot, option);
+
+        if (GetController() is { } controller)
+        {
+            UpdateVoteCounts(controller);
+        }
+
+        CheckForEarlyVoteClose();
     }
 
-    private void CheckForEarlyVoteClose(IBaseEntity controller)
+    private int CountOption(CastVote option)
     {
-        var votes = GetOptionCount(controller, (int) CastVote.VOTE_OPTION1)
-                    + GetOptionCount(controller, (int) CastVote.VOTE_OPTION2);
+        var target = (int) option;
+        var n = 0;
+        for (var i = 0; i < _voterCount; i++)
+        {
+            if (_slotVote[_voters[i]] == target)
+            {
+                n++;
+            }
+        }
 
-        if (votes >= _voterCount)
+        return n;
+    }
+
+    private int CountVoted()
+    {
+        var n = 0;
+        for (var i = 0; i < _voterCount; i++)
+        {
+            if (_slotVote[_voters[i]] != (int) CastVote.VOTE_UNCAST)
+            {
+                n++;
+            }
+        }
+
+        return n;
+    }
+
+    private void CheckForEarlyVoteClose()
+    {
+        if (CountVoted() >= _voterCount)
         {
             _modSharp.InvokeFrameAction(() => EndVote(YesNoVoteEndReason.VoteEnd_AllVotes));
         }
@@ -367,14 +411,14 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         var info = new YesNoVoteInfo
         {
             num_clients = _voterCount,
-            yes_votes   = GetOptionCount(controller, (int) CastVote.VOTE_OPTION1),
-            no_votes    = GetOptionCount(controller, (int) CastVote.VOTE_OPTION2),
+            yes_votes   = CountOption(CastVote.VOTE_OPTION1),
+            no_votes    = CountOption(CastVote.VOTE_OPTION2),
         };
         info.num_votes = info.yes_votes + info.no_votes;
 
         for (var i = 0; i < _voterCount; i++)
         {
-            info.clientInfo[i] = (_voters[i], GetVotesCast(controller, _voters[i]));
+            info.clientInfo[i] = (_voters[i], _slotVote[_voters[i]]);
         }
 
         var passed = _voteResult(info);
@@ -406,11 +450,9 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
             return false;
         }
 
-        var myVote = GetVotesCast(controller, slot);
-        if (myVote != (int) CastVote.VOTE_UNCAST)
+        if (_slotVote[slot] != (int) CastVote.VOTE_UNCAST)
         {
-            SetOptionCount(controller, myVote, GetOptionCount(controller, myVote) - 1);
-            SetVotesCast(controller, slot, (int) CastVote.VOTE_UNCAST);
+            _slotVote[slot] = (int) CastVote.VOTE_UNCAST;
             UpdateVoteCounts(controller);
         }
 
@@ -421,19 +463,26 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
 
     private void UpdateVoteCounts(IBaseEntity controller)
     {
-        // Firing vote_changed refreshes the panorama tally UI. The netvars alone already drive the
-        // counts, so this is a nice-to-have; guard on CreateEvent returning null.
+        var yes = CountOption(CastVote.VOTE_OPTION1);
+        var no  = CountOption(CastVote.VOTE_OPTION2);
+
+        // Mirror our tally into the controller netvars (keeps the entity state consistent) …
+        SetOptionCount(controller, (int) CastVote.VOTE_OPTION1, yes);
+        SetOptionCount(controller, (int) CastVote.VOTE_OPTION2, no);
+
+        // … and push it to the panel via vote_changed — the panorama UI reads its counters from this
+        // event, not from the netvars (this is how Kandru drives the count, from a self-tracked tally).
         var @event = _eventManager.CreateEvent("vote_changed", true);
         if (@event is null)
         {
             return;
         }
 
-        @event.SetInt("vote_option1", GetOptionCount(controller, 0));
-        @event.SetInt("vote_option2", GetOptionCount(controller, 1));
-        @event.SetInt("vote_option3", GetOptionCount(controller, 2));
-        @event.SetInt("vote_option4", GetOptionCount(controller, 3));
-        @event.SetInt("vote_option5", GetOptionCount(controller, 4));
+        @event.SetInt("vote_option1", yes);
+        @event.SetInt("vote_option2", no);
+        @event.SetInt("vote_option3", 0);
+        @event.SetInt("vote_option4", 0);
+        @event.SetInt("vote_option5", 0);
         @event.SetInt("potentialVotes", _voterCount);
 
         @event.Fire(false);
@@ -445,6 +494,8 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         _voteResult    = null;
         _currentTitle  = string.Empty;
         _currentDetail = string.Empty;
+
+        Array.Fill(_slotVote, (int) CastVote.VOTE_UNCAST);
 
         for (var i = 0; i < IPanoramaVoteService.MAXPLAYERS; i++)
         {
@@ -565,14 +616,10 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         return found;
     }
 
-    private static int GetOptionCount(IBaseEntity controller, int index)
-        => controller.GetNetVar<int>("m_nVoteOptionCount", (ushort) (index * 4));
-
+    // Counts are self-tracked (see _slotVote); we only WRITE the netvars to keep the entity state
+    // consistent, never read them (the engine doesn't reliably tally a hijacked vote).
     private static void SetOptionCount(IBaseEntity controller, int index, int value)
         => controller.SetNetVar("m_nVoteOptionCount", value, extraOffset: (ushort) (index * 4));
-
-    private static int GetVotesCast(IBaseEntity controller, int slot)
-        => controller.GetNetVar<int>("m_nVotesCast", (ushort) (slot * 4));
 
     private static void SetVotesCast(IBaseEntity controller, int slot, int value)
         => controller.SetNetVar("m_nVotesCast", value, extraOffset: (ushort) (slot * 4));
