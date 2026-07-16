@@ -3,7 +3,7 @@
     "en-US": "No vote is currently in progress."
   },
   "PanoramaVote_UsageVote": {
-    "en-US": "Usage: vote [seconds] <question>"
+    "en-US": "Usage: vote <question>"
   },
   "PanoramaVote_StartFailed": {
     "en-US": "Could not start the vote (one may already be running)."

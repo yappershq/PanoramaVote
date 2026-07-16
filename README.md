@@ -33,7 +33,7 @@ Uses the **ModSharp first-party modules** (ship with ModSharp): **CommandCenter*
 
 | Command | Description | Permission |
 |---------|-------------|------------|
-| `vote [seconds] <question>` | Start a freeform yes/no poll shown to everyone (e.g. `vote 30 Can we slap Bob?`). The tally is announced in chat when it ends; the admin acts on the result. Duration defaults to 25s (clamped 5–120). | `panoramavote:admin:manage` |
+| `vote <question>` | Start a freeform yes/no poll shown to everyone (e.g. `vote Can we slap Bob?`). Runs 20s, or ends early once everyone has voted. The tally is announced in chat; the admin acts on the result. | `panoramavote:admin:manage` |
 | `revote` | Reopen the vote panel for yourself to change your vote while a vote is running. | — (any player) |
 | `cancelvote` | Cancel the vote currently in progress. | `panoramavote:admin:manage` |
 

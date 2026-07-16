@@ -29,10 +29,8 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
 
     private const int OptionCount = 5;
 
-    // Default + clamp for the admin `vote` command's duration.
-    private const float DefaultVoteSeconds = 25f;
-    private const float MinVoteSeconds     = 5f;
-    private const float MaxVoteSeconds     = 120f;
+    // Fixed duration for the admin `vote` command.
+    private const float VoteSeconds = 20f;
 
     private readonly ILogger<PanoramaVoteManager> _logger;
     private readonly IEntityManager               _entityManager;
@@ -565,45 +563,26 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
     }
 
     /// <summary>
-    ///     Admin `vote [seconds] &lt;question&gt;` — start a freeform yes/no poll shown to everyone
+    ///     Admin `vote &lt;question&gt;` — start a freeform 20-second yes/no poll shown to everyone
     ///     (e.g. "Can we slap Bob?"). The result is announced in chat; the admin acts on it. This is
     ///     the built-in driver so the plugin is usable standalone — other plugins still call the
     ///     service directly for votes wired to an automatic action.
     /// </summary>
     private void OnVoteCommand(IGameClient? issuer, StringCommand command)
     {
-        var raw = command.ArgString.Trim();
-        if (raw.Length == 0)
+        var question = command.ArgString.Trim();
+        if (question.Length == 0)
         {
-            ReplyKey(issuer, "PanoramaVote_UsageVote", "Usage: vote [seconds] <question>");
+            ReplyKey(issuer, "PanoramaVote_UsageVote", "Usage: vote <question>");
             return;
         }
 
-        // Optional leading whole-number seconds; the remainder is the question. Integer parse
-        // (invariant) so a "NaN"/culture-formatted token can't become a non-firing timer duration.
-        var duration = DefaultVoteSeconds;
-        var space    = raw.IndexOf(' ');
-        if (space > 0
-            && int.TryParse(raw[..space], System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out var seconds))
-        {
-            duration = Math.Clamp(seconds, MinVoteSeconds, MaxVoteSeconds);
-            raw      = raw[(space + 1)..].Trim();
-        }
-
-        if (raw.Length == 0)
-        {
-            ReplyKey(issuer, "PanoramaVote_UsageVote", "Usage: vote [seconds] <question>");
-            return;
-        }
-
-        var question = raw;
-        var caller   = issuer is { IsInGame: true }
+        var caller = issuer is { IsInGame: true }
             ? (int) issuer.Slot.AsPrimitive()
             : IPanoramaVoteService.VOTE_CALLER_SERVER;
 
         var started = SendYesNoVoteToAll(
-            duration,
+            VoteSeconds,
             caller,
             question,
             string.Empty,
