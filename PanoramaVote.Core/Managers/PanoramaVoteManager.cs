@@ -33,9 +33,12 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
     private const float VoteSeconds = 20f;
 
     // The panorama title (disp_str) must be a localization token, not raw text — CS2 resolves it
-    // client-side. This token (from platform_english.txt, value "{s:s1}") renders the details
-    // string, i.e. the admin's question, as the visible vote text.
-    private const string VoteTitleToken = "#SFUI_vote_panorama_vote_default";
+    // client-side. Default to a STOCK token every client already has ("Change current level to
+    // {s:s1}?") so the panel renders with zero custom-file distribution. Override via the
+    // pv_vote_title convar — e.g. a custom "{s:s1}" token if you ship one to clients, or another
+    // stock token. The question is passed as the details string ({s:s1}).
+    private const string DefaultVoteTitleToken = "#SFUI_vote_changelevel";
+    private IConVar? _voteTitleCvar;
 
     private readonly ILogger<PanoramaVoteManager> _logger;
     private readonly IEntityManager               _entityManager;
@@ -122,6 +125,10 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         _localizer = _sharpModuleManager
             .GetOptionalSharpModuleInterface<ILocalizerManager>(ILocalizerManager.Identity)?.Instance;
         _localizer?.LoadLocaleFile("panoramavote");
+
+        _voteTitleCvar = InterfaceBridge.Instance.ConVarManager.CreateConVar(
+            "pv_vote_title", DefaultVoteTitleToken,
+            "Localization token used as the panorama vote title (disp_str). Must be a #SFUI_ token the client has; the question is rendered via the token's {s:s1}.");
 
         RegisterCommands();
 
@@ -586,11 +593,13 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
             ? (int) issuer.Slot.AsPrimitive()
             : IPanoramaVoteService.VOTE_CALLER_SERVER;
 
+        var titleToken = _voteTitleCvar?.GetString() is { Length: > 0 } t ? t : DefaultVoteTitleToken;
+
         var started = SendYesNoVoteToAll(
             VoteSeconds,
             caller,
-            VoteTitleToken,   // disp_str: the token; the client renders {s:s1} = the question below
-            question,         // details_str: the actual question text
+            titleToken,   // disp_str: the token; the client renders {s:s1} = the question below
+            question,     // details_str: the actual question text
             info =>
             {
                 var passed = info.yes_votes > info.no_votes;
