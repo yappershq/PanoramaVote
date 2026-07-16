@@ -191,6 +191,8 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         _logger.LogInformation("[PanoramaVote] Starting vote [id:{Id}] Duration:{Duration} Caller:{Caller} NumClients:{Count}",
             _voteCount, duration, caller, voters.Count);
 
+        EnsureVoteConVars();
+
         _voteInProgress = true;
         InitVoters(voters);
 
@@ -244,6 +246,27 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         }
 
         EndVote(YesNoVoteEndReason.VoteEnd_Cancelled);
+    }
+
+    // The panorama vote panel renders regardless, but casting (F1/F2) is gated by these replicated
+    // convars — with them off you "see the vote but can't vote". They reset on map/restart, so
+    // re-assert at each vote start. This does NOT enable the native callvote menu on its own — that
+    // is gated separately by the sv_vote_issue_*_allowed convars, which are left untouched.
+    private static readonly (string Name, bool Value)[] VoteConVars =
+    [
+        ("sv_allow_votes", true),
+        ("sv_vote_allow_in_warmup", true),
+        ("sv_vote_allow_spectators", true),
+        ("sv_vote_count_spectator_votes", true),
+    ];
+
+    private void EnsureVoteConVars()
+    {
+        foreach (var (name, value) in VoteConVars)
+        {
+            try { InterfaceBridge.Instance.ConVarManager.FindConVar(name)?.Set(value); }
+            catch { /* convar missing on this build — non-fatal */ }
+        }
     }
 
     // ── Vote flow ─────────────────────────────────────────────────────────────
