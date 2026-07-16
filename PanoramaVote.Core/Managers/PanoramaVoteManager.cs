@@ -22,12 +22,17 @@ using Sharp.Shared.Units;
 ///     writing <c>vote_controller</c> netvars, sending the vote user-messages, and listening for
 ///     the <c>vote_cast</c> game event. There is no native yes/no vote function in the engine.
 /// </summary>
-internal sealed class PanoramaVoteManager : IModule, IEventListener, IPanoramaVoteService
+internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListener, IPanoramaVoteService
 {
     private const string ModuleIdentity = "PanoramaVote.Core";
     private const string PermManage     = "panoramavote:admin:manage";
 
     private const int OptionCount = 5;
+
+    // Default + clamp for the admin `vote` command's duration.
+    private const float DefaultVoteSeconds = 25f;
+    private const float MinVoteSeconds     = 5f;
+    private const float MaxVoteSeconds     = 120f;
 
     private readonly ILogger<PanoramaVoteManager> _logger;
     private readonly IEntityManager               _entityManager;
@@ -65,14 +70,41 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IPanoramaVo
 
     // ── IEventListener ────────────────────────────────────────────────────────
 
-    public int ListenerVersion  => IEventListener.ApiVersion;
-    public int ListenerPriority => 0;
+    int IEventListener.ListenerVersion  => IEventListener.ApiVersion;
+    int IEventListener.ListenerPriority => 0;
 
     public void FireGameEvent(IGameEvent @event)
     {
-        if (@event.GetName() == "vote_cast")
+        switch (@event.GetName())
         {
-            OnVoteCast(@event);
+            case "vote_cast":
+                OnVoteCast(@event);
+                break;
+
+            // A vote left running when the round ends would otherwise strand: the vote-end timer
+            // is StopOnRoundEnd and would be silently discarded, leaving _voteInProgress true and
+            // the panel stuck. Resolve it here with whatever's been tallied so far.
+            case "round_end":
+                if (_voteInProgress)
+                {
+                    EndVote(YesNoVoteEndReason.VoteEnd_TimeUp);
+                }
+                break;
+        }
+    }
+
+    // ── IGameListener ─────────────────────────────────────────────────────────
+
+    int IGameListener.ListenerVersion  => IGameListener.ApiVersion;
+    int IGameListener.ListenerPriority => 0;
+
+    // Map end: same stranding risk as round_end (the timer is StopOnMapEnd). Force-resolve so the
+    // manager, which persists across maps, never carries a stuck vote into the next map.
+    public void OnGameDeactivate()
+    {
+        if (_voteInProgress)
+        {
+            EndVote(YesNoVoteEndReason.VoteEnd_Cancelled);
         }
     }
 
@@ -91,12 +123,15 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IPanoramaVo
         RegisterCommands();
 
         _eventManager.HookEvent("vote_cast");
+        _eventManager.HookEvent("round_end");
         _eventManager.InstallEventListener(this);
+        _modSharp.InstallGameListener(this);
     }
 
     public void Shutdown()
     {
         _eventManager.RemoveEventListener(this);
+        _modSharp.RemoveGameListener(this);
 
         if (_revoteCallback is { } cb)
         {
@@ -452,7 +487,12 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IPanoramaVo
 
     private IBaseEntity? GetController()
     {
-        if (_controllerIndex is { } idx && _entityManager.FindEntityByIndex(idx) is { } byIndex)
+        // Index is resolved without a serial, so a recycled index could point at an unrelated
+        // entity (e.g. after a stranded vote survives a map change) — verify the classname before
+        // trusting the fast path, else fall through to a fresh classname search.
+        if (_controllerIndex is { } idx
+            && _entityManager.FindEntityByIndex(idx) is { } byIndex
+            && byIndex.Classname == "vote_controller")
         {
             return byIndex;
         }
@@ -519,8 +559,102 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IPanoramaVo
                 [],
                 []));
 
-        adminManager.GetCommandRegistry(ModuleIdentity)
-            .RegisterAdminCommand("cancelvote", OnCancelVoteCommand, ImmutableArray.Create(PermManage));
+        var registry = adminManager.GetCommandRegistry(ModuleIdentity);
+        registry.RegisterAdminCommand("cancelvote", OnCancelVoteCommand, ImmutableArray.Create(PermManage));
+        registry.RegisterAdminCommand("vote",       OnVoteCommand,       ImmutableArray.Create(PermManage));
+    }
+
+    /// <summary>
+    ///     Admin `vote [seconds] &lt;question&gt;` — start a freeform yes/no poll shown to everyone
+    ///     (e.g. "Can we slap Bob?"). The result is announced in chat; the admin acts on it. This is
+    ///     the built-in driver so the plugin is usable standalone — other plugins still call the
+    ///     service directly for votes wired to an automatic action.
+    /// </summary>
+    private void OnVoteCommand(IGameClient? issuer, StringCommand command)
+    {
+        var raw = command.ArgString.Trim();
+        if (raw.Length == 0)
+        {
+            ReplyKey(issuer, "PanoramaVote_UsageVote", "Usage: vote [seconds] <question>");
+            return;
+        }
+
+        // Optional leading whole-number seconds; the remainder is the question. Integer parse
+        // (invariant) so a "NaN"/culture-formatted token can't become a non-firing timer duration.
+        var duration = DefaultVoteSeconds;
+        var space    = raw.IndexOf(' ');
+        if (space > 0
+            && int.TryParse(raw[..space], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+        {
+            duration = Math.Clamp(seconds, MinVoteSeconds, MaxVoteSeconds);
+            raw      = raw[(space + 1)..].Trim();
+        }
+
+        if (raw.Length == 0)
+        {
+            ReplyKey(issuer, "PanoramaVote_UsageVote", "Usage: vote [seconds] <question>");
+            return;
+        }
+
+        var question = raw;
+        var caller   = issuer is { IsInGame: true }
+            ? (int) issuer.Slot.AsPrimitive()
+            : IPanoramaVoteService.VOTE_CALLER_SERVER;
+
+        var started = SendYesNoVoteToAll(
+            duration,
+            caller,
+            question,
+            string.Empty,
+            info =>
+            {
+                var passed = info.yes_votes > info.no_votes;
+                BroadcastResult(question, passed, info.yes_votes, info.no_votes);
+                return passed;
+            });
+
+        if (!started)
+        {
+            ReplyKey(issuer, "PanoramaVote_StartFailed", "Could not start the vote (one may already be running).");
+        }
+    }
+
+    private void BroadcastResult(string question, bool passed, int yes, int no)
+    {
+        var key      = passed ? "PanoramaVote_Passed" : "PanoramaVote_Failed";
+        var fallback = passed
+            ? $"Vote PASSED: {question}  (yes {yes} / no {no})"
+            : $"Vote FAILED: {question}  (yes {yes} / no {no})";
+
+        foreach (var client in EnumerateEligible())
+        {
+            if (_localizer is { } localizer && !client.IsFakeClient)
+            {
+                localizer.For(client).Localized(key, question, yes, no).Prefix(null).Print();
+            }
+            else
+            {
+                client.Print(HudPrintChannel.Chat, fallback);
+            }
+        }
+    }
+
+    private void ReplyKey(IGameClient? client, string key, string fallback)
+    {
+        if (client is not { IsInGame: true })
+        {
+            _logger.LogInformation("[PanoramaVote] {Message}", fallback);
+            return;
+        }
+
+        if (_localizer is { } localizer && !client.IsFakeClient)
+        {
+            localizer.For(client).Localized(key).Prefix(null).Print();
+            return;
+        }
+
+        client.Print(HudPrintChannel.Chat, fallback);
     }
 
     private void OnCancelVoteCommand(IGameClient? issuer, StringCommand command)

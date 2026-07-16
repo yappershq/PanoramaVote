@@ -1,5 +1,17 @@
 {
   "PanoramaVote_NoVoteInProgress": {
     "en-US": "No vote is currently in progress."
+  },
+  "PanoramaVote_UsageVote": {
+    "en-US": "Usage: vote [seconds] <question>"
+  },
+  "PanoramaVote_StartFailed": {
+    "en-US": "Could not start the vote (one may already be running)."
+  },
+  "PanoramaVote_Passed": {
+    "en-US": "Vote PASSED: {0}  (yes {1} / no {2})"
+  },
+  "PanoramaVote_Failed": {
+    "en-US": "Vote FAILED: {0}  (yes {1} / no {2})"
   }
 }
