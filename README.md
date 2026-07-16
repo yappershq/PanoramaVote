@@ -25,6 +25,19 @@ Copy the build output into your ModSharp install (`<sharp>` = your `sharp` direc
 
 Restart the server (or change map) to load.
 
+## ⚠️ Server requirements
+
+The native vote panel is gated by engine convars and needs a localization file for custom text:
+
+```
+sv_allow_votes 1
+sv_vote_allow_in_warmup 1
+sv_vote_allow_spectators 1
+sv_vote_count_spectator_votes 1
+```
+
+Custom vote text is shown via a localization token (`disp_str`), not a raw string — CS2 resolves it **client-side**. Ship `resource/platform_english.txt` (bundled) to `game/csgo/resource/` on the server, and distribute it to clients via your server's workshop addon / fastdl so the token (`#SFUI_vote_panorama_vote_default` → `{s:s1}`) renders the question. Without the file on a client, that client sees the raw token instead of the text.
+
 ## 🧩 Dependencies
 
 Uses the **ModSharp first-party modules** (ship with ModSharp): **CommandCenter** (the `cancelvote` admin command), **AdminManager** (the `panoramavote:admin:manage` permission), and **LocalizerManager** (localized command feedback). AdminManager/LocalizerManager degrade gracefully — without AdminManager the `cancelvote` command isn't registered; without LocalizerManager feedback falls back to plain English.

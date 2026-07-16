@@ -32,6 +32,11 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
     // Fixed duration for the admin `vote` command.
     private const float VoteSeconds = 20f;
 
+    // The panorama title (disp_str) must be a localization token, not raw text — CS2 resolves it
+    // client-side. This token (from platform_english.txt, value "{s:s1}") renders the details
+    // string, i.e. the admin's question, as the visible vote text.
+    private const string VoteTitleToken = "#SFUI_vote_panorama_vote_default";
+
     private readonly ILogger<PanoramaVoteManager> _logger;
     private readonly IEntityManager               _entityManager;
     private readonly IClientManager               _clientManager;
@@ -584,8 +589,8 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         var started = SendYesNoVoteToAll(
             VoteSeconds,
             caller,
-            question,
-            string.Empty,
+            VoteTitleToken,   // disp_str: the token; the client renders {s:s1} = the question below
+            question,         // details_str: the actual question text
             info =>
             {
                 var passed = info.yes_votes > info.no_votes;
