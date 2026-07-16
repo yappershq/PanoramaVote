@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Public contract for the Panorama YES/NO vote service.
+    Only framework types (Sharp.Shared) are exposed here - NO ORM / 3rd-party types,
+    which would cause single-ALC TypeLoad failures across the plugin boundary.
+  -->
+</Project>

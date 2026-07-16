@@ -1,0 +1,57 @@
+<Project>
+  <!-- Repo root path for ProjectReferences (works at any nesting depth) -->
+  <PropertyGroup>
+    <PVRoot>$(MSBuildThisFileDirectory)</PVRoot>
+  </PropertyGroup>
+
+  <!-- Common properties for all projects -->
+  <PropertyGroup>
+    <Authors>yappershq</Authors>
+    <VersionPrefix>1.0</VersionPrefix>
+    <VersionSuffix>0</VersionSuffix>
+    <Version>$(VersionPrefix).$(VersionSuffix)</Version>
+
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>x64</PlatformTarget>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <!-- Determine output category based on project name -->
+  <PropertyGroup>
+    <IsSharedProject>$([System.String]::new('$(MSBuildProjectName)').EndsWith('.Shared'))</IsSharedProject>
+    <IsModuleProject Condition="'$(IsSharedProject)' != 'true'">true</IsModuleProject>
+  </PropertyGroup>
+
+  <!-- .Shared projects build to .build/shared/, modules to .build/modules/ -->
+  <PropertyGroup Condition="'$(IsSharedProject)' == 'true'">
+    <OutputPath>$(MSBuildThisFileDirectory).build\shared\$(MSBuildProjectName)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsModuleProject)' == 'true'">
+    <OutputPath>$(MSBuildThisFileDirectory).build\modules\$(MSBuildProjectName)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**" />
+    <EmbeddedResource Remove="obj\**" />
+    <None Remove="obj\**" />
+  </ItemGroup>
+
+  <!-- ModSharp framework references via NuGet. ExcludeAssets=runtime -> compile-only; the server
+       provides the runtime DLLs. Keep in sync with the modsharp build on the servers. -->
+  <PropertyGroup>
+    <ModSharpVersion>2.1.132</ModSharpVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModSharp.Sharp.Shared" Version="$(ModSharpVersion)" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

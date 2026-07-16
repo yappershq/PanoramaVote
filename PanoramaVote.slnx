@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Shared/">
+    <Project Path="PanoramaVote.Shared\PanoramaVote.Shared.csproj" />
+  </Folder>
+  <Folder Name="/Core/">
+    <Project Path="PanoramaVote.Core\PanoramaVote.Core.csproj" />
+  </Folder>
+</Solution>
