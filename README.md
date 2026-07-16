@@ -36,7 +36,9 @@ sv_vote_allow_spectators 1
 sv_vote_count_spectator_votes 1
 ```
 
-Custom vote text is shown via a localization token (`disp_str`), not a raw string — CS2 resolves it **client-side**. Ship `resource/platform_english.txt` (bundled) to `game/csgo/resource/` on the server, and distribute it to clients via your server's workshop addon / fastdl so the token (`#SFUI_vote_panorama_vote_default` → `{s:s1}`) renders the question. Without the file on a client, that client sees the raw token instead of the text.
+Custom vote text is shown via a localization token (`disp_str`), not a raw string — CS2 resolves it **client-side**. Merge the pass-through tokens in `resource/panorama_vote_tokens.txt` (bundled) into your **`game/csgo/resource/csgo_english.txt`** — that's the localization file CS2 actually loads (a standalone `platform_english.txt` is ignored). Insert them inside the `"Tokens"` block (e.g. next to the stock `SFUI_Vote_*` entries). The token `#SFUI_vote_panorama_vote_default` (value `{s:s1}`) renders the details string as the visible vote text; the color variants wrap it in a `<font>` tag.
+
+Because tokens resolve client-side, the modified `csgo_english.txt` must reach **clients** too — ship it through the content your server already distributes (workshop addon / fastdl). Without it on a client, that client sees the raw token instead of the text.
 
 ## 🧩 Dependencies
 
