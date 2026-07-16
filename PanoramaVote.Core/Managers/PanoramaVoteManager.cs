@@ -33,11 +33,11 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
     private const float VoteSeconds = 20f;
 
     // The panorama title (disp_str) must be a localization token, not raw text — CS2 resolves it
-    // client-side. Default to a STOCK token every client already has ("Change current level to
-    // {s:s1}?") so the panel renders with zero custom-file distribution. Override via the
-    // pv_vote_title convar — e.g. a custom "{s:s1}" token if you ship one to clients, or another
-    // stock token. The question is passed as the details string ({s:s1}).
-    private const string DefaultVoteTitleToken = "#SFUI_vote_changelevel";
+    // client-side. Default to a pure pass-through "{s:s1}" token so the question renders as-is with
+    // no "Change current level to …" wrapper. This requires the token to exist on clients — ship a
+    // small localization vpk (see resource/panorama_vote_tokens.txt). Fall back to a stock token via
+    // pv_vote_title if you don't distribute one. The question is passed as the details string.
+    private const string DefaultVoteTitleToken = "#SFUI_vote_custom_default";
     private IConVar? _voteTitleCvar;
 
     private readonly ILogger<PanoramaVoteManager> _logger;
