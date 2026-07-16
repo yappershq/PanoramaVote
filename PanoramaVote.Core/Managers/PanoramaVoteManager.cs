@@ -130,6 +130,10 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
             "pv_vote_title", DefaultVoteTitleToken,
             "Localization token used as the panorama vote title (disp_str). Must be a #SFUI_ token the client has; the question is rendered via the token's {s:s1}.");
 
+        _blockNativeCvar = InterfaceBridge.Instance.ConVarManager.CreateConVar(
+            "pv_block_native_votes", true,
+            "When enabling sv_allow_votes for our vote, also disable the native callvote issues (changelevel/kick/…) so players can't spam them.");
+
         RegisterCommands();
 
         _eventManager.HookEvent("vote_cast");
@@ -250,9 +254,8 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
 
     // The panorama vote panel renders regardless, but casting (F1/F2) is gated by these replicated
     // convars — with them off you "see the vote but can't vote". They reset on map/restart, so
-    // re-assert at each vote start. This does NOT enable the native callvote menu on its own — that
-    // is gated separately by the sv_vote_issue_*_allowed convars, which are left untouched.
-    private static readonly (string Name, bool Value)[] VoteConVars =
+    // re-assert at each vote start. (Same 4 the mature Kandru/cs2-panorama-vote-manager sets.)
+    private static readonly (string Name, bool Value)[] EnableVoteConVars =
     [
         ("sv_allow_votes", true),
         ("sv_vote_allow_in_warmup", true),
@@ -260,12 +263,38 @@ internal sealed class PanoramaVoteManager : IModule, IEventListener, IGameListen
         ("sv_vote_count_spectator_votes", true),
     ];
 
+    // Enabling sv_allow_votes also lets players call the NATIVE votes (changelevel/kick/…). Disable
+    // those issues so our panorama vote is the only thing sv_allow_votes opens. Gated by
+    // pv_block_native_votes (default on). Mirrors Kandru's ServerDisableVoteOptions list.
+    private static readonly string[] NativeIssueConVars =
+    [
+        "sv_vote_issue_changelevel_allowed", "sv_vote_issue_kick_allowed",
+        "sv_vote_issue_loadbackup_allowed", "sv_vote_issue_matchready_allowed",
+        "sv_vote_issue_nextlevel_allowed", "sv_vote_issue_nextlevel_allowextend",
+        "sv_vote_issue_pause_match_allowed", "sv_vote_issue_restart_game_allowed",
+        "sv_vote_issue_scramble_teams_allowed", "sv_vote_issue_surrrender_allowed",
+        "sv_vote_issue_swap_teams_allowed", "sv_vote_issue_timeout_allowed",
+    ];
+
+    private IConVar? _blockNativeCvar;
+
     private void EnsureVoteConVars()
     {
-        foreach (var (name, value) in VoteConVars)
+        var cvm = InterfaceBridge.Instance.ConVarManager;
+
+        foreach (var (name, value) in EnableVoteConVars)
         {
-            try { InterfaceBridge.Instance.ConVarManager.FindConVar(name)?.Set(value); }
+            try { cvm.FindConVar(name)?.Set(value); }
             catch { /* convar missing on this build — non-fatal */ }
+        }
+
+        if (_blockNativeCvar?.GetBool() ?? true)
+        {
+            foreach (var name in NativeIssueConVars)
+            {
+                try { cvm.FindConVar(name)?.Set(false); }
+                catch { /* non-fatal */ }
+            }
         }
     }
 
