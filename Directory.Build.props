@@ -48,7 +48,7 @@
   <!-- ModSharp framework references via NuGet. ExcludeAssets=runtime -> compile-only; the server
        provides the runtime DLLs. Keep in sync with the modsharp build on the servers. -->
   <PropertyGroup>
-    <ModSharpVersion>2.1.132</ModSharpVersion>
+    <ModSharpVersion>2.1.136</ModSharpVersion>
   </PropertyGroup>
 
   <ItemGroup>
